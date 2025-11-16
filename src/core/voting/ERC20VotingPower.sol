@@ -1,91 +1,110 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Votes.sol";
+import "@openzeppelin/contracts/token/ERC20/extensions/ERC20Permit.sol";
+import "@openzeppelin/contracts/access/AccessControl.sol";
+
 /**
- * @title DGPTreasury
- * @dev DAO-controlled treasury for managing ETH and ERC20 assets.
- * Execution of spending is restricted to Governor through Timelock.
- * The governor address should be the Timelock contract, not the Governor directly.
+ * @title ERC20VotingPower
+ * @dev ERC20 token with voting power delegation, snapshot capabilities, and admin-controlled minting.
+ * Each token = 1 vote weight. Supports delegation and checkpointing.
+ * Only accounts with MINTER_ROLE can mint new tokens.
  */
-import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+contract ERC20VotingPower is ERC20, ERC20Permit, ERC20Votes, AccessControl {
+    bytes32 public constant MINTER_ROLE = keccak256("MINTER_ROLE");
+    uint256 private immutable _tokenMaxSupply;
 
-contract DGPTreasury {
-    using SafeERC20 for IERC20;
-
-    address public immutable timelock;
-    address public immutable governor;
-    
-    event ETHWithdrawn(address indexed recipient, uint256 amount);
-    event TokenWithdrawn(address indexed token, address indexed recipient, uint256 amount);
-    event ETHReceived(address indexed sender, uint256 amount);
-
-    modifier onlyTimelock() {
-        require(msg.sender == timelock, "DGPTreasury: caller is not timelock");
-        _;
-    }
+    event TokensMinted(address indexed to, uint256 amount);
 
     /**
-     * @param _timelock Address of the TimelockController (not the Governor directly)
-     * @param _governor Address of the Governor contract
+     * @param name Token name
+     * @param symbol Token symbol
+     * @param initialSupply Initial supply minted to deployer
+     * @param maxSupply_ Maximum supply that can ever exist (0 = unlimited)
+     * @param initialHolder Address that receives initialSupply (use creator)
      */
-    constructor(address _timelock, address _governor) {
-        require(_timelock != address(0), "DGPTreasury: invalid timelock address");
-        require(_governor != address(0), "DGPTreasury: invalid governor address");
-        timelock = _timelock;
-        governor = _governor;
-    }
-
-    /**
-     * @dev Withdraw ETH from treasury
-     * @param recipient Address to receive ETH
-     * @param amount Amount of ETH to withdraw
-     */
-    function withdrawETH(address payable recipient, uint256 amount) external onlyTimelock {
-        require(recipient != address(0), "DGPTreasury: invalid recipient");
-        require(amount > 0, "DGPTreasury: amount must be greater than 0");
-        require(address(this).balance >= amount, "DGPTreasury: insufficient balance");
+    constructor(
+        string memory name,
+        string memory symbol,
+        uint256 initialSupply,
+        uint256 maxSupply_,
+        address initialHolder
+    )
+        ERC20(name, symbol)
+        ERC20Permit(name)
+    {
+        require(maxSupply_ == 0 || initialSupply <= maxSupply_, "Initial supply exceeds max supply");
+        require(initialHolder != address(0), "Initial holder zero address");
+        _tokenMaxSupply = maxSupply_;
         
-        (bool success, ) = recipient.call{value: amount}("");
-        require(success, "DGPTreasury: ETH transfer failed");
+        // Set up roles
+        _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
+        _grantRole(MINTER_ROLE, msg.sender);
         
-        emit ETHWithdrawn(recipient, amount);
+        if (initialSupply > 0) {
+            _mint(initialHolder, initialSupply);
+            emit TokensMinted(initialHolder, initialSupply);
+        }
     }
 
     /**
-     * @dev Withdraw ERC20 tokens from treasury
-     * @param token Address of the ERC20 token
-     * @param recipient Address to receive tokens
-     * @param amount Amount of tokens to withdraw
+     * @dev Mint new tokens (only callable by MINTER_ROLE)
+     * @param to Address to receive tokens
+     * @param amount Amount to mint
      */
-    function withdrawToken(address token, address recipient, uint256 amount) external onlyTimelock {
-        require(token != address(0), "DGPTreasury: invalid token address");
-        require(recipient != address(0), "DGPTreasury: invalid recipient");
-        require(amount > 0, "DGPTreasury: amount must be greater than 0");
+    function mint(address to, uint256 amount) external onlyRole(MINTER_ROLE) {
+        require(to != address(0), "Cannot mint to zero address");
+        if (_tokenMaxSupply > 0) {
+            require(totalSupply() + amount <= _tokenMaxSupply, "Exceeds max supply");
+        }
+        _mint(to, amount);
+        emit TokensMinted(to, amount);
+    }
+
+    /**
+     * @dev Batch mint tokens to multiple addresses (only callable by MINTER_ROLE)
+     * @param recipients Array of addresses to receive tokens
+     * @param amounts Array of amounts to mint to each address
+     */
+    function batchMint(address[] calldata recipients, uint256[] calldata amounts) external onlyRole(MINTER_ROLE) {
+        require(recipients.length == amounts.length, "Arrays length mismatch");
         
-        IERC20(token).safeTransfer(recipient, amount);
-
-        emit TokenWithdrawn(token, recipient, amount);
+        for (uint256 i = 0; i < recipients.length; i++) {
+            address r = recipients[i];
+            uint256 a = amounts[i];
+            if (a > 0 && r != address(0)) {
+                if (_tokenMaxSupply > 0) {
+                    require(totalSupply() + a <= _tokenMaxSupply, "Exceeds max supply");
+                }
+                _mint(r, a);
+                emit TokensMinted(r, a);
+            }
+        }
     }
 
-    /**
-     * @dev Get ETH balance of treasury
-     */
-    function getETHBalance() external view returns (uint256) {
-        return address(this).balance;
+    // OpenZeppelin v5 unified hook
+    function _update(address from, address to, uint256 value)
+        internal
+        override(ERC20, ERC20Votes)
+    {
+        super._update(from, to, value);
     }
 
-    /**
-     * @dev Get token balance of treasury
-     * @param token Address of the ERC20 token
-     */
-    function getTokenBalance(address token) external view returns (uint256) {
-        return IERC20(token).balanceOf(address(this));
+    // Conflict between ERC20Permit and ERC20Votes
+    function nonces(address owner)
+        public
+        view
+        override(ERC20Permit, Nonces)
+        returns (uint256)
+    {
+        return super.nonces(owner);
     }
-    /**
-     * @dev Receive ETH
-     */
-    receive() external payable {
-        emit ETHReceived(msg.sender, msg.value);
+
+    // Admin helper to add a minter (factory or creator/timelock can call while holding DEFAULT_ADMIN_ROLE)
+    function setMinter(address newMinter) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        require(newMinter != address(0), "Invalid minter");
+        _grantRole(MINTER_ROLE, newMinter);
     }
 }
