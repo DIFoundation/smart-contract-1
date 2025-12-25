@@ -19,9 +19,15 @@ contract GovernorFactory {
         address token;
         uint8 tokenType;
         uint32 createdAt;
+        string daoName;
+        string daoDescription;
+        string daoLogoURI;
     }
 
     struct CreateDAOParams {
+        string daoName;        // Name of the DAO Organization
+        string daoDescription; // Short bio
+        string daoLogoURI;     // IPFS/HTTPS link to logo
         string tokenName;
         string tokenSymbol;
         uint256 initialSupply;
@@ -51,6 +57,7 @@ contract GovernorFactory {
     function createDAO(CreateDAOParams calldata p) external returns (address, address, address, address) {
         address timelock = _deployTimelock(p.timelockDelay);
         address token = _deployToken(p.tokenType, p.tokenName, p.tokenSymbol, p.initialSupply, p.maxSupply, p.baseURI);
+        // p.daoName, p.daoDescription, p.daoLogoURI
         address governor = _deployGovernor(token, timelock, p.votingDelay, p.votingPeriod, p.proposalThreshold, p.quorumPercentage);
         address treasury = _deployTreasury(timelock);
 
@@ -61,7 +68,10 @@ contract GovernorFactory {
             treasury: treasury,
             token: token,
             tokenType: p.tokenType,
-            createdAt: uint32(block.timestamp)
+            createdAt: uint32(block.timestamp),
+            daoName: p.daoName,
+            daoDescription: p.daoDescription,
+            daoLogoURI: p.daoLogoURI
         }));
         
         daoIdsByCreator[msg.sender].push(daoId);
