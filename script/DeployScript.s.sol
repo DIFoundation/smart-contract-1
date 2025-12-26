@@ -2,20 +2,20 @@
 pragma solidity ^0.8.13;
 
 import {Script, console} from "forge-std/Script.sol";
-import {GovernorFactory} from "../src/factories/GovernorFactory.sol";
+// import {GovernorFactory} from "../src/factories/GovernorFactory.sol";
 
-contract GovernorFactoryScript is Script {
-    GovernorFactory public governorFactory;
+// contract GovernorFactoryScript is Script {
+//     GovernorFactory public governorFactory;
 
-    function setUp() public {}
+//     function setUp() public {}
 
-    function run() public {
-        vm.startBroadcast();
+//     function run() public {
+//         vm.startBroadcast();
 
-        governorFactory = new GovernorFactory();
+//         governorFactory = new GovernorFactory();
 
-        vm.stopBroadcast();
-    }
-}
+//         vm.stopBroadcast();
+//     }
+// }
 
-// forge script script/DeployScript.s.sol --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast --etherscan-api-key $ETHERSCAN_API_KEY --verify
+// forge script script/DeployScript.s.sol --rpc-url $RPC_URL --private-key $PRIVATE_KEY --broadcast --etherscan-api-key $ETHERSCAN_API_KEY --verify -vvvv
